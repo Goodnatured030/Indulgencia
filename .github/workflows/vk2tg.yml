@@ -8,16 +8,9 @@ on:
 jobs:
   vk_to_telegram:
     runs-on: ubuntu-latest
-
     steps:
       - name: Checkout repository
         uses: actions/checkout@v3
-
-      - name: Restore last_id cache
-        uses: actions/cache@v3
-        with:
-          path: last_id.txt
-          key: vk-last-id
 
       - name: Set up Python
         uses: actions/setup-python@v4
@@ -33,10 +26,3 @@ jobs:
           VK_TOKEN: ${{ secrets.VK_TOKEN }}
           TG_TOKEN: ${{ secrets.TG_TOKEN }}
           CHAT_ID: ${{ secrets.CHAT_ID }}
-          GROUP_ID: ${{ secrets.GROUP_ID }}
-
-      - name: Save last_id cache
-        uses: actions/cache@v3
-        with:
-          path: last_id.txt
-          key: vk-last-id
