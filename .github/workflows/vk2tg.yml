@@ -1,12 +1,12 @@
 name: VK → Telegram
 
 on:
-  workflow_dispatch:     # запуск вручную
-  schedule:              # запуск каждые 5 минут
+  workflow_dispatch:
+  schedule:
     - cron: '*/5 * * * *'
 
 permissions:
-  contents: write         # нужно для git commit/push файла last_id.txt
+  contents: write     # даём права runner’у для пуша
 
 jobs:
   run:
@@ -15,6 +15,8 @@ jobs:
     steps:
     - name: 🔽 Клонировать репозиторий
       uses: actions/checkout@v3
+      with:
+        persist-credentials: true
 
     - name: 🔧 Установить зависимости
       run: |
@@ -26,14 +28,4 @@ jobs:
         VK_TOKEN: ${{ secrets.VK_TOKEN }}
         TG_TOKEN: ${{ secrets.TG_TOKEN }}
         CHAT_ID: ${{ secrets.CHAT_ID }}
-      run: |
-        python main.py
-
-    - name: 🔼 Запушить обновлённый last_id.txt
-      run: |
-        git config user.name "vk2tg-bot"
-        git config user.email "bot@vk2tg.com"
-        git add last_id.txt
-        git commit -m "update last_id"
-        git push
-      continue-on-error: true
+      run: python main.py
