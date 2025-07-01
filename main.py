@@ -20,16 +20,26 @@ def save_last_id(pid):
 
 def run():
     last_id = get_last_id()
-    posts = vk.wall.get(owner_id=-GROUP_ID, count=1)['items']
-    if not posts:
-        return
-    pid = posts[0]['id']
-    if pid == last_id:
-        return
-    text = posts[0].get('text', '').strip()
-    link = f"https://vk.com/wall-{GROUP_ID}_{pid}"
-    tg.send_message(CHAT_ID, f"{text}\n\n{link}")
-    save_last_id(pid)
+    # Берём несколько записей, чтобы пропустить закреплённый
+    posts = vk.wall.get(owner_id=-GROUP_ID, count=5)['items']
+
+    # Находим первую неприкреплённую запись
+    for post in posts:
+        if post.get('is_pinned', 0) == 1:
+            continue
+        pid = post['id']
+        if pid == last_id:
+            return  # последнюю уже отсылали
+        text = post.get('text', '').strip()
+        if not text:
+            return  # пустой текст — ничего не шлём
+
+        # Отправляем только текст
+        tg.send_message(CHAT_ID, text)
+
+        # Фиксируем, что эту запись уже отослали
+        save_last_id(pid)
+        return  # после отправки выходим
 
 if __name__ == '__main__':
     run()
