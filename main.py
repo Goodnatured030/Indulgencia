@@ -3,18 +3,19 @@ import subprocess
 from vk_api import VkApi
 from telegram import Bot, InputMediaPhoto
 
-# Загрузка токенов и настроек из окружения
+# Загружаем токены и настройки
 VK_TOKEN = os.environ['VK_TOKEN']
 TG_TOKEN = os.environ['TG_TOKEN']
 CHAT_ID  = os.environ['CHAT_ID']
-GROUP_ID = 44554509
+GROUP_ID = 44554509  # без "club"
 
 vk = VkApi(token=VK_TOKEN).get_api()
 tg = Bot(token=TG_TOKEN)
 
 def get_last_id():
     try:
-        return int(open('last_id.txt').read().strip())
+        with open('last_id.txt', 'r') as f:
+            return int(f.read().strip())
     except:
         return 0
 
@@ -22,7 +23,7 @@ def save_last_id_and_commit(pid):
     # Сохраняем ID
     with open('last_id.txt', 'w') as f:
         f.write(str(pid))
-    # Коммитим и пушим обратно в репозиторий
+    # Коммитим и пушим файл обратно
     for cmd in [
         ['git','config','--global','user.email','bot@vk2tg.com'],
         ['git','config','--global','user.name','vk2tg-bot'],
@@ -34,22 +35,30 @@ def save_last_id_and_commit(pid):
 
 def run():
     last_id = get_last_id()
-    posts = vk.wall.get(owner_id=-GROUP_ID, count=5)['items']
 
+    # 1) Попытка получить ленту, при ошибках — graceful exit
+    try:
+        posts = vk.wall.get(owner_id=-GROUP_ID, count=5)['items']
+    except Exception as e:
+        print(f"⚠️ Ошибка VK API: {e}")
+        return
+
+    # 2) Ищем первый неприкреплённый новый пост
     for post in posts:
         if post.get('is_pinned', 0):
             continue
 
         pid = post['id']
         if pid == last_id:
+            print("🚫 Дубликат, уже отправляли")
             return
 
-        # 1) Отправляем текст поста
-        text = post.get('text', '').strip()
+        # 3) Текст
+        text = post.get('text','').strip()
         if text:
             tg.send_message(CHAT_ID, text)
 
-        # 2) Отправляем фотографии
+        # 4) Фото
         media = []
         for att in post.get('attachments', []):
             if att['type'] == 'photo':
@@ -62,26 +71,26 @@ def run():
             else:
                 tg.send_media_group(CHAT_ID, media)
 
-        # 3) Отправляем видео как Markdown-ссылку
+        # 5) Видео как Markdown-ссылка
         for att in post.get('attachments', []):
             if att['type'] == 'video':
                 v = att['video']
                 owner = v['owner_id']
                 vid   = v['id']
-                title = v.get('title', 'Видео')
-                access = v.get('access_key')
+                title = v.get('title','Видео')
                 link = f"https://vk.com/video{owner}_{vid}"
-                if access:
-                    link += f"?access_key={access}"
+                if v.get('access_key'):
+                    link += f"?access_key={v['access_key']}"
                 tg.send_message(
                     CHAT_ID,
                     f"🎥 [{title}]({link})",
                     parse_mode='Markdown'
                 )
 
-        # Сохраняем и коммитим last_id
+        # 6) Сохраняем и коммитим
         save_last_id_and_commit(pid)
-        return  # только один пост за запуск
+        print("✅ Отправлено и запомнено")
+        return
 
 if __name__ == '__main__':
     run()
