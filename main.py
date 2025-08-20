@@ -1,96 +1,62 @@
 import os
-import subprocess
-from vk_api import VkApi
-from telegram import Bot, InputMediaPhoto
+import vk_api
+import telegram
 
-# Загружаем токены и настройки
-VK_TOKEN = os.environ['VK_TOKEN']
-TG_TOKEN = os.environ['TG_TOKEN']
-CHAT_ID  = os.environ['CHAT_ID']
-GROUP_ID = 44554509  # без "club"
+# Конфигурация
+VK_TOKEN = os.getenv("VK_TOKEN")
+TELEGRAM_TOKEN = os.getenv("TELEGRAM_TOKEN")
+CHAT_ID = os.getenv("CHAT_ID")
+GROUP_ID = int(os.getenv("GROUP_ID", "0"))  # без минуса!
 
-vk = VkApi(token=VK_TOKEN).get_api()
-tg = Bot(token=TG_TOKEN)
+LAST_ID_FILE = "last_id.txt"
 
 def get_last_id():
-    try:
-        with open('last_id.txt', 'r') as f:
+    """Читаем последний опубликованный пост"""
+    if os.path.exists(LAST_ID_FILE):
+        with open(LAST_ID_FILE, "r") as f:
             return int(f.read().strip())
-    except:
-        return 0
+    return 0
 
-def save_last_id_and_commit(pid):
-    # Сохраняем ID
-    with open('last_id.txt', 'w') as f:
-        f.write(str(pid))
-    # Коммитим и пушим файл обратно
-    for cmd in [
-        ['git','config','--global','user.email','bot@vk2tg.com'],
-        ['git','config','--global','user.name','vk2tg-bot'],
-        ['git','add','last_id.txt'],
-        ['git','commit','-m',f'update last_id to {pid}'],
-        ['git','push']
-    ]:
-        subprocess.run(cmd, check=False)
+def set_last_id(post_id):
+    """Сохраняем id последнего поста"""
+    with open(LAST_ID_FILE, "w") as f:
+        f.write(str(post_id))
+
+def send_to_telegram(post):
+    """Отправка поста в Telegram"""
+    bot = telegram.Bot(token=TELEGRAM_TOKEN)
+
+    text = post.get("text", "")
+    attachments = post.get("attachments", [])
+
+    # Если есть фото → берём самое большое
+    photos = [a for a in attachments if a["type"] == "photo"]
+    if photos:
+        photo = max(photos[0]["photo"]["sizes"], key=lambda x: x["width"])["url"]
+        bot.send_photo(chat_id=CHAT_ID, photo=photo, caption=text[:1024] or None)
+    else:
+        bot.send_message(chat_id=CHAT_ID, text=text or "(без текста)")
 
 def run():
+    vk_session = vk_api.VkApi(token=VK_TOKEN)
+    vk = vk_session.get_api()
+
+    posts = vk.wall.get(owner_id=-GROUP_ID, count=5)["items"]
+
     last_id = get_last_id()
+    new_posts = [p for p in posts if p["id"] > last_id]
 
-    # 1) Попытка получить ленту, при ошибках — graceful exit
-    try:
-        posts = vk.wall.get(owner_id=-GROUP_ID, count=5)['items']
-    except Exception as e:
-        print(f"⚠️ Ошибка VK API: {e}")
+    # Если новых постов нет — выходим
+    if not new_posts:
+        print("Нет новых постов.")
         return
 
-    # 2) Ищем первый неприкреплённый новый пост
-    for post in posts:
-        if post.get('is_pinned', 0):
-            continue
+    # Отправляем от старого к новому
+    for post in reversed(new_posts):
+        send_to_telegram(post)
 
-        pid = post['id']
-        if pid == last_id:
-            print("🚫 Дубликат, уже отправляли")
-            return
+    # Сохраняем id последнего
+    set_last_id(new_posts[0]["id"])
 
-        # 3) Текст
-        text = post.get('text','').strip()
-        if text:
-            tg.send_message(CHAT_ID, text)
-
-        # 4) Фото
-        media = []
-        for att in post.get('attachments', []):
-            if att['type'] == 'photo':
-                sizes = att['photo']['sizes']
-                best = max(sizes, key=lambda s: s['width'] * s['height'])
-                media.append(InputMediaPhoto(media=best['url']))
-        if media:
-            if len(media) == 1:
-                tg.send_photo(CHAT_ID, media[0].media)
-            else:
-                tg.send_media_group(CHAT_ID, media)
-
-        # 5) Видео как Markdown-ссылка
-        for att in post.get('attachments', []):
-            if att['type'] == 'video':
-                v = att['video']
-                owner = v['owner_id']
-                vid   = v['id']
-                title = v.get('title','Видео')
-                link = f"https://vk.com/video{owner}_{vid}"
-                if v.get('access_key'):
-                    link += f"?access_key={v['access_key']}"
-                tg.send_message(
-                    CHAT_ID,
-                    f"🎥 [{title}]({link})",
-                    parse_mode='Markdown'
-                )
-
-        # 6) Сохраняем и коммитим
-        save_last_id_and_commit(pid)
-        print("✅ Отправлено и запомнено")
-        return
-
-if __name__ == '__main__':
+if __name__ == "__main__":
     run()
